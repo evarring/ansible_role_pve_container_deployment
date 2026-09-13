@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: MIT-0
+---
+# tasks file for pve_container_deployment
+
+- name: Download lxc container template from web
+  community.proxmox.proxmox_template:
+    api_host: "{{ pve_container_deployment_proxmox_api_ip }}"
+    api_user: "{{ pve_container_deployment_proxmox_api_token_user }}"
+    api_token_id: "{{ pve_container_deployment_proxmox_api_token_id }}"
+    api_token_secret: "{{ pve_container_deployment_proxmox_api_token_secret }}"
+    validate_certs: "{{ pve_container_deployment_proxmox_validate_certs }}"
+    node: "{{ pve_container_deployment_node }}"
+    storage: "{{ pve_container_deployment_dl_template.storage | default('local') }}"
+    content_type: vztmpl
+    url: "{{ pve_container_deployment_dl_template.url }}"
+    template: "{{ pve_container_deployment_dl_template.name }}"
+    force: "{{ pve_container_deployment_dl_template.name | default(false) }}"
+  tags: download
+  when: pve_container_deployment_dl_template is defined
+
+- name: Stop the lxc container
+  delegate_to: localhost
+  tags: stop, destroy, redeploy
+  block:
+    - name: Get initial lxc container status
+      community.proxmox.proxmox_vm_info:
+        name: "{{ pve_container_deployment_container.hostname }}"
+        api_host: "{{ pve_container_deployment_proxmox_api_ip }}"
+        api_user: "{{ pve_container_deployment_proxmox_api_token_user }}"
+        api_token_id: "{{ pve_container_deployment_proxmox_api_token_id }}"
+        api_token_secret: "{{ pve_container_deployment_proxmox_api_token_secret }}"
+        validate_certs: "{{ pve_container_deployment_proxmox_validate_certs }}"
+        type: lxc
+      register: lxcstatus
+
+    - name: Stop the lxc container if it is running
+      community.proxmox.proxmox:
+        hostname: "{{ pve_container_deployment_container.hostname }}"
+        api_host: "{{ pve_container_deployment_proxmox_api_ip }}"
+        api_user: "{{ pve_container_deployment_proxmox_api_token_user }}"
+        api_token_id: "{{ pve_container_deployment_proxmox_api_token_id }}"
+        api_token_secret: "{{ pve_container_deployment_proxmox_api_token_secret }}"
+        validate_certs: "{{ pve_container_deployment_proxmox_validate_certs }}"
+        state: stopped
+        force: true
+      when:
+        - lxcstatus.proxmox_vms is defined
+        - lxcstatus.proxmox_vms[0].status is defined
+
+- name: Destroy the lxc container
+  community.proxmox.proxmox:
+    hostname: "{{ pve_container_deployment_container.hostname }}"
+    api_host: "{{ pve_container_deployment_proxmox_api_ip }}"
+    api_user: "{{ pve_container_deployment_proxmox_api_token_user }}"
+    api_token_id: "{{ pve_container_deployment_proxmox_api_token_id }}"
+    api_token_secret: "{{ pve_container_deployment_proxmox_api_token_secret }}"
+    validate_certs: "{{ pve_container_deployment_proxmox_validate_certs }}"
+    purge: true
+    force: true
+    state: absent
+  delegate_to: localhost
+  tags: never, destroy, redeploy
+
+- name: Create or configure the lxc container
+  community.proxmox.proxmox:
+    vmid: "{{ pve_container_deployment_container.vmid | default(omit) }}"
+    api_host: "{{ pve_container_deployment_proxmox_api_ip }}"
+    api_user: "{{ pve_container_deployment_proxmox_api_token_user }}"
+    api_token_id: "{{ pve_container_deployment_proxmox_api_token_id }}"
+    api_token_secret: "{{ pve_container_deployment_proxmox_api_token_secret }}"
+    validate_certs: "{{ pve_container_deployment_proxmox_validate_certs }}"
+    node: "{{ pve_container_deployment_node }}"
+    password: "{{ pve_container_deployment_container.password }}"
+    cores: "{{ pve_container_deployment_container.cores | default(1) }}"
+    cpus: "{{ pve_container_deployment_container.cpus | default(1) }}"
+    memory: "{{ pve_container_deployment_container.memory | default(512) }}"
+    features: "{{ pve_container_deployment_container.features | default(omit) }}"
+    description: "{{ pve_container_deployment_container.description | default(omit) }}"
+    mount_volumes: "{{ pve_container_deployment_container.mount_volumes | default(omit) }}"
+    disk_volume: "{{ pve_container_deployment_container.disk_volume | default(omit) }}"
+    hostname: "{{ pve_container_deployment_container.hostname }}"
+    searchdomain: "{{ pve_container_deployment_container.searchdomain | default(omit) }}"
+    nameserver: "{{ pve_container_deployment_container.nameserver | default(omit) }}"
+    ostemplate: "{{ pve_container_deployment_container.ostemplate }}"
+    pubkey: "{{ pve_container_deployment_container.pubkey | default(omit) }}"
+    ostype: "{{ pve_container_deployment_container.ostype | default(omit) }}"
+    storage: "{{ pve_container_deployment_container.storage | default(omit) }}"
+    tags: "{{ pve_container_deployment_container.tags | default(omit) }}"
+    pool: "{{ pve_container_deployment_container.pool | default(omit) }}"
+    unprivileged: "{{ pve_container_deployment_container.unprivileged | default(true) }}"
+    netif: "{{ pve_container_deployment_container.netif }}"
+  delegate_to: localhost
+  tags: config, redeploy, deploy
+  register: create_result
+  retries: 5
+  delay: 3
+  until: create_result is succeeded
+
+- name: Start the lxc container
+  community.proxmox.proxmox:
+    hostname: "{{ pve_container_deployment_container.hostname }}"
+    api_host: "{{ pve_container_deployment_proxmox_api_ip }}"
+    api_user: "{{ pve_container_deployment_proxmox_api_token_user }}"
+    api_token_id: "{{ pve_container_deployment_proxmox_api_token_id }}"
+    api_token_secret: "{{ pve_container_deployment_proxmox_api_token_secret }}"
+    validate_certs: "{{ pve_container_deployment_proxmox_validate_certs }}"
+    timeout: 5
+    state: started
+  delegate_to: localhost
+  tags: start
+  register: startlxc
+  retries: 10
+  delay: 3
+  until: startlxc is succeeded
+...
